@@ -1,5 +1,7 @@
 ; vim: ft=asm_ca65
 
+.feature line_continuations +
+
 .enum
     GCIO_REPORT
     GCIO_BEHAVE
@@ -8,11 +10,34 @@
     GCIO_RUMBLE
 .endenum
 
+.if ((1 << 31) + 1) < 0
+    .ifndef ca6532
+        .define ca6532
+    .endif
+.else
+    .ifndef ca6564
+        .define ca6564
+    .endif
+.endif
+
 .scope gcio
+    .define concat(foo, bar) foo ## bar
+    .define ld(r) ld ## r
+    .define st(r) st ## r
+
     .ifndef IOPORT1
         .define IOPORT1 $4016
         .define IOPORT2 $4017
+    .endif
 
+    .if ca6564
+        .define sr(n, s) (n >> s)
+    .else
+        .define sr(n, s) ((                     \
+                .mid( 0, 32, {n}) * (s > 31) +  \
+                .mid(32, 32, {n}) * (s < 32)    \
+            ) >> (s & $ffff_ffff)               \
+        )
     .endif
 
     ; waste [a,x,y]
@@ -53,6 +78,7 @@
         __RestoreTask GCIO_INVERT, a
     .endmacro
 
+
     .macro CChangeInvert invert, nInvert, r
         .if .blank(r)
             _r = a
@@ -69,7 +95,7 @@
         __SwitchTask GCIO_INVERT, _r
 
         .repeat nInvert, s
-            .if (invert >> s) & 1
+            .if sr(invert, s) & 1
                 st(_r) IOPORT1
             .else
                 ld(_r) IOPORT1
@@ -216,12 +242,12 @@
                 .endif
             .endrepeat
         .elseif type = GCIO_INMASK
-            .if message > 42
+            .if message > 61
                 .error "gcio65.payload message is too big!"
             .endif
 
-            .repeat 42, s
-                .if (message >> s) & 1
+            .repeat 61, s
+                .if sr(message, s) & 1
                     st(r) IOPORT1
                 .else
                     ld(r) IOPORT1
@@ -245,8 +271,4 @@
             ld(r) IOPORT1
         .endrepeat
     .endmacro
-
-    .define concat(foo, bar) foo ## bar
-    .define ld(r) ld ## r
-    .define st(r) st ## r
 .endscope
