@@ -59,7 +59,7 @@
             sta IOPORT1
             bcs check
         cLoop:
-            nop IOPORT0
+            bit IOPORT0
         check:
             dey
             bne enter
@@ -193,7 +193,7 @@
     ; in    [a] behavior
     ; waste [i] 
     .macro RTChangeBehavior i
-        .local loop, exit, enter
+        .local loop
         
         .if i = x
             _i = x
@@ -206,24 +206,14 @@
         __ChangeTask GCIO_BEHAVE, _i
 
         ld(_i) #8
-        bne enter
         
         loop:
-            dex
-            beq exit
-
-        enter:
             lsr
-            bcc r
-            bcs w
-
-            r:
-                ld(r) IOPORT1
-                bcc loop
-            w:
-                st(r) IOPORT1
-                bcs loop
-        exit:
+            sta IOPORT1
+            bit IOPORT1
+            dex
+            bne loop
+        
         __RestoreTask GCIO_BEHAVE, _i
     .endmacro
 
@@ -246,7 +236,7 @@
                 .error "gcio65.payload message is too big!"
             .endif
 
-            .repeat 61, s
+            .repeat 64, s
                 .if sr(message, s) & 1
                     st(r) IOPORT1
                 .else
@@ -271,4 +261,11 @@
             ld(r) IOPORT1
         .endrepeat
     .endmacro
+
+    .export RTChangeInvert
+    .export CCHangeInvert
+    .export RTChangeBehavior
+    .export CChangeBehavior
+    .export RTChangeMask
+    .export CChangeMask
 .endscope
