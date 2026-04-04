@@ -46,27 +46,6 @@
             ) >> (s & $ffff_ffff)               \
         )
     .endif
- 
-    ; internal function to write paylods to the adaptor
-    .macro __CWritePayload msg, type, r
-        .if type = GCIO_BEHAVE
-            .if message > 8
-                .error "gcio65.payload message is too big!"
-            .endif
-            
-            .repeat 8, s
-                __CWriteBit msg, s, r
-            .endrepeat
-        .elseif type = GCIO_INMASK .or type = GCIO_INVERT
-            .if message > 64
-                .error "gcio65.payload message is too big!"
-            .endif
-
-            .repeat 64, s
-                __CWriteBit msg, s, r
-            .endrepeat
-        .endif
-    .endmacro
 
     .macro __ChangeTask task, r
         .if task > GCIO_RUMBLE
@@ -86,7 +65,7 @@
         st(r) IOPORT1       ; confirm task
     .endmacro
 
-    .macro __WriteQWord qword
+    .macro __RTWriteQWord qword
         .local fetch, loop
 
                 ldy #0
@@ -109,7 +88,7 @@
     .endmacro
 
 
-    .macro CChangeInvert invert, nInvert, r
+    .macro CChangeInvert invert, r
         .if .blank(r)
             _r = a
         .elseif r = a
@@ -123,13 +102,8 @@
         .endif
 
         __SwitchTask GCIO_INVERT, _r
-
-        .repeat nInvert, s
-            .if sr(invert, s) & 1
-                st(_r) IOPORT1
-            .else
-                ld(_r) IOPORT1
-            .endif
+        .repeat 64, s
+            __CWriteBit invert, s, _r
         .endrepeat
     .endmacro
 
@@ -144,7 +118,7 @@
         .endif
     
         __SwitchTask GCIO_INMASK, _i
-        __WriteQWord pMask
+        __RTWriteQWord pMask
     .endmacro
 
     .macro CChangeMask mask, r
@@ -161,7 +135,9 @@
         .endif
 
         __SwitchTask GCIO_INMASK, _r
-        __WritePayload mask, GCIO_INMASK, _r
+        .repeat 64, s
+            __CWriteBit invert, s, _r
+        .endrepeat
     .endmacro
 
 
@@ -181,7 +157,9 @@
         .endif
 
         __SwitchTask GCIO_BEHAVE, _r
-        __CWritePayload behave, GCIO_BEHAVE, _r
+        .repeat 8, s
+            __CWriteBit invert, s, _r
+        .endrepeat
     .endmacro 
 
     ; in    [a] behavior
