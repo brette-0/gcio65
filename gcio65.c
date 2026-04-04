@@ -24,6 +24,7 @@
 namespace gcio {
     void __fastcall__ RTChangeBehavior(uint8_t behavior) {
         (void)PEEK(IOPORT1);
+        (void)PEEK(IOPORT1);
         (void)PEEK(IOPORT1);             // switch to behavior change mode
 
         __asm__("ldx #8");
@@ -36,37 +37,27 @@ namespace gcio {
         __asm__("pla");
         __asm__("dex");
         __asm__("bne :-");
-        (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1); 
-        (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1);            // reset to poll
     }
 
     void __fastcall__ RTChangeMask(const uint8_t* mask){
         static uint8_t bits;
         static uint8_t byte;
-
+        (void)PEEK(IOPORT1);
         (void)PEEK(IOPORT1);
         (void)PEEK(IOPORT1);
         POKE(IOPORT1, 1);   // set mode to change mask
 
         SEND_QWORD(mask);
-
-        (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1);  // reset to poll
     }
 
     void __fastcall__ RTChangeInvert(const uint8_t* invert){
         static uint8_t _nInvert = nInvert;
         (void)PEEK(IOPORT1);
         (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1); 
+        (void)PEEK(IOPORT1);
+        (void)PEEK(IOPORT1);
         POKE(IOPORT1, 1);  // set mode to invert
         
-        SEND_QWORD(invert);
-
-        (void)PEEK(IOPORT1);
-        (void)PEEK(IOPORT1);    
+        SEND_QWORD(invert);    
     } 
 }

@@ -2,12 +2,17 @@
 
 .feature line_continuations +
 
+.include "__CWriteBit.s"
+
 .enum
+    GCIO_LEGACY
     GCIO_REPORT
     GCIO_BEHAVE
     GCIO_INMASK
     GCIO_INVERT
     GCIO_RUMBLE
+    GCIO_LSETUP
+    GCIO_END
 .endenum
 
 .if ((1 << 31) + 1) < 0
@@ -41,37 +46,7 @@
             ) >> (s & $ffff_ffff)               \
         )
     .endif
-
-    .macro __CWriteBit msg, s, r
-        .local d0, d1
-
-        .if s = 0
-            ld(r) #msg & 1
-            st(r) IOPORT1
-            bit   IOPORT1
-
-            .exitmacro
-        .endif
-
-        d0 = (sr(msg, s))       & 1
-        d1 = (sr(msg, (s + 1))) & 1
-
-        .if d0 <> d1
-            .if r = a
-                eor #$01
-            .else
-                .if d1
-                    in(r)
-                .else
-                    de(r)
-                .endif
-            .endif
-        .endif
-
-        st(r) IOPORT1
-        bit   IOPORT1
-    .endmacro
-
+ 
     ; internal function to write paylods to the adaptor
     .macro __CWritePayload msg, type, r
         .if type = GCIO_BEHAVE
@@ -98,15 +73,17 @@
             .error "gcio.__ChangeTask task is not a valid task!"
         .endif
         
+        ldr #1
+        sta IOPORT1         ; begin mode select
         .repeat task, _
-            ld(r) IOPORT1
+            ld(r) IOPORT1   ; increment task index n times
         .endrepeat
-    .endmacro
-
-    .macro __RestoreTask task, r
-        .repeat GCIO_RUMBLE + 1 - task, _
-            ld(r) IOPORT1
-        .endrepeat
+        .if r = a
+            lda #0
+        .else
+            de(r)
+        .endif
+        st(r) IOPORT1       ; confirm task
     .endmacro
 
     .macro __WriteQWord qword
@@ -129,7 +106,6 @@
     .macro RTChangeInvert invert, temp, i
         __SwitchTask GCIO_INVERT, a
         __WriteQWord invert
-        __RestoreTask GCIO_INVERT, a
     .endmacro
 
 
@@ -155,8 +131,6 @@
                 ld(_r) IOPORT1
             .endif
         .endrepeat
-
-        __RestoreTask GCIO_INVERT, _r
     .endmacro
 
     ; waste [a,i]
@@ -170,8 +144,7 @@
         .endif
     
         __SwitchTask GCIO_INMASK, _i
-        __WriteQWord pMask    
-        __RestoreTask GCIO_INMASK, _i
+        __WriteQWord pMask
     .endmacro
 
     .macro CChangeMask mask, r
@@ -189,7 +162,6 @@
 
         __SwitchTask GCIO_INMASK, _r
         __WritePayload mask, GCIO_INMASK, _r
-        __RestoreTask GCIO_INMASK, _r
     .endmacro
 
 
@@ -210,7 +182,6 @@
 
         __SwitchTask GCIO_BEHAVE, _r
         __CWritePayload behave, GCIO_BEHAVE, _r
-        __RestoreTask GCIO_BEHAVE, _r
     .endmacro 
 
     ; in    [a] behavior
@@ -235,9 +206,7 @@
             sta IOPORT1
             bit IOPORT1
             dex
-            bne loop
-        
-        __RestoreTask GCIO_BEHAVE, _i
+            bne loop 
     .endmacro
 
     .export RTChangeInvert
