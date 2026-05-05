@@ -8,7 +8,6 @@
     GCIO_LEGACY
     GCIO_REPORT
     GCIO_BEHAVE
-    GCIO_INMASK
     GCIO_INVERT
     GCIO_RUMBLE
     GCIO_LSETUP
@@ -26,6 +25,12 @@
 .endif
 
 .scope gcio
+    .segment ZP
+        ptr:    .res 2
+        size:   .res 1
+        
+    .import port1
+
     .define concat(foo, bar) foo ## bar
     .define ld(r) ld ## r
     .define st(r) st ## r
@@ -47,150 +52,165 @@
         )
     .endif
 
-    .macro __ChangeTask task, r
-        .if task > GCIO_RUMBLE
-            .error "gcio.__ChangeTask task is not a valid task!"
-        .endif
-        
-        ldr #1
-        sta IOPORT1         ; begin mode select
-        .repeat task, _
-            ld(r) IOPORT1   ; increment task index n times
-        .endrepeat
-        .if r = a
-            lda #0
-        .else
-            de(r)
-        .endif
-        st(r) IOPORT1       ; confirm task
-    .endmacro
+    .segment CODE:
 
-    .macro __RTWriteQWord qword
-        .local fetch, loop
+        ; in {
+        ;   ptr = (const u64*)(x << 8 | a)
+        ; }
+        ;
+        ; out {
+        ;   n = 0
+        ;   z = 1
+        ;   c = *ptr & 0x80
+        ;   x = 0
+        ;   y = 0
+        ;   a = 0
+        ; }
+        .proc ChangeInvert
+            .local loop, bigLoop
+            sta ptr
+            stx ptr + 1
+           
+            lda #7
+            tay
+            stx IOPORT1
 
-                ldy #0
-        loop:   ldx #8
-                lda pMask, y
-                sta $4016
+            ; switch mode
+            .repeat _, GCIO_INVERT
+                bit IOPORT1
+            .endrepeat
+            
+            @bigLoop:
+                ldx #8
+            @loop:
+                lda [ptr], y
+                sta IOPORT1
+                bit IOPORT1
                 lsr
                 dex
                 bne loop
-        fetch:  iny
-                cpy #8
-                bne loop
-    .endmacro
+            dey
+            bne @bigLoop
+            rts
+        .endproc
 
-    ; waste [a,x,y]
-    ; ptr   [invert]
-    .macro RTChangeInvert invert, temp, i
-        __SwitchTask GCIO_INVERT, a
-        __WriteQWord invert
-    .endmacro
+        ; in {
+        ;   behave = a
+        ; }
+        ;
+        ; out {
+        ;   a = 64 - (
+        ;           behave & 0x80
+        ;               ? 16
+        ;               : 0
+        ;       ) - (
+        ;           behave & 0x40 
+        ;               ? 16
+        ;               : 0
+        ;       ) - (
+        ;           behave & 0x20
+        ;               ? 16
+        ;               : behave & 0x10
+        ;                   ? 8
+        ;                   : 0
+        ;       )
+        ;
+        ;   x = ((behave & 0xe0) >> 4) + (behave & 0x20
+        ;       ? 0
+        ;       : behave & 0x10
+        ;           ? 1
+        ;           : 0
+        ;       )
+        ;
+        ;   z = 0
+        ;   c = 1
+        ;   n = 0
+        ; }
+        .proc ChangeBehavior
+            .local loop
+
+            ldx #9
+            stx IOPORT1
+            .repeat _, GCIO_BEHAVE
+                bit IOPORT1
+            .endrepeat
+            dex
+            stx IOPORT1
+            
+            ror
+            @loop:
+                sta IOPORT1
+                bit IOPORT1
+                ror
+                dex
+                bne @loop
+            
+            ldx #8
+            ror
+            bpl @checkLStick
+            dex
+            dex
+
+            @checkLStick:
+                asl
+                bpl @checkHasTriggers
+                dex
+                dex
+
+            @checkHasTriggers:
+                asl
+                bpl @checkUnifiedTriggers
+                dex
+                dex
+                bne @apply
+
+            @checkUnifiedTriggers:
+                asl
+                bpl @apply
+                dex
+            @apply: 
+                stx len
+                rts
+        .endproc
 
 
-    .macro CChangeInvert invert, r
-        .if .blank(r)
-            _r = a
-        .elseif r = a
-            _r = a
-        .elseif r = x
-            _r = x
-        .elseif r = y
-            _r = y
-        .else
-            .error "gcio65.CChangeInvert ... r is not a register!"
-        .endif
-
-        __SwitchTask GCIO_INVERT, _r
-        .repeat 64, s
-            __CWriteBit invert, s, _r
-        .endrepeat
-    .endmacro
-
-    ; waste [a,i]
-    .macro RTChangeMask pMask, i
-        .if i = x
-            _i = x
-        .elseif i = y
-            _i = y
-        .else
-            .error "gcio65.RTChangeBehavior i is not an indexing capable register"
-        .endif
-    
-        __SwitchTask GCIO_INMASK, _i
-        __RTWriteQWord pMask
-    .endmacro
-
-    .macro CChangeMask mask, r
-        .if .blank(r)
-            _r = a
-        .elseif r = a
-            _r = a
-        .elseif r = x
-            _r = x
-        .elseif r = y
-            _r = y
-        .else
-            .error "gcio65.ChangeBehavior ... r is not a register!"
-        .endif
-
-        __SwitchTask GCIO_INMASK, _r
-        .repeat 64, s
-            __CWriteBit invert, s, _r
-        .endrepeat
-    .endmacro
-
-
-    ; change the behavior of polling (does not change output size) -> first phase of input preprocessing
-    ; assumes the task ptr in the adaptor is pointing towards REPORT and is unlatched
-    .macro CChangeBehavior behavior, r
-        .if .blank(r)
-            _r = a
-        .elseif r = a
-            _r = a
-        .elseif r = x
-            _r = x
-        .elseif r = y
-            _r = y
-        .else
-            .error "gcio65.ChangeBehavior ... r is not a register!"
-        .endif
-
-        __SwitchTask GCIO_BEHAVE, _r
-        .repeat 8, s
-            __CWriteBit invert, s, _r
-        .endrepeat
-    .endmacro 
-
-    ; in    [a] behavior
-    ; waste [i] 
-    .macro RTChangeBehavior i
-        .local loop
-        
-        .if i = x
-            _i = x
-        .elseif i = y
-            _i = y
-        .else
-            .error "gcio65.RTChangeBehavior i is not an indexing capable register"
-        .endif
-        
-        __ChangeTask GCIO_BEHAVE, _i
-
-        ld(_i) #8
-        
-        loop:
+        ; in {
+        ;   out = (u64*)(a << 8 | x)
+        ; }
+        ;
+        ; out {
+        ;   *out = ?
+        ;   x = 0
+        ;   a = 0
+        ;   c = 1
+        ;   n = ?
+        ;   z = ?
+        ; }
+        .proc Report
+            stx ptr + 1
+            sta ptr
+            ldx len
+            lda #1
+            sta IOPORT1
+            .repeat _, GCIO_REPORT
+                bit IOPORT1
+            .endrepeat
             lsr
             sta IOPORT1
-            bit IOPORT1
-            dex
-            bne loop 
-    .endmacro
 
-    .export RTChangeInvert
-    .export CCHangeInvert
-    .export RTChangeBehavior
-    .export CChangeBehavior
-    .export RTChangeMask
-    .export CChangeMask
+            @bigLoop:
+                lda #0
+                sta port1, x
+                rol port1, x
+            @smallLoop:
+                lda IOPORT1
+                lsr
+                rol port1, x
+                bcc @smallLoop
+                dex
+                bne @bigLoop
+            rts
+        .endproc
 .endscope
+
+.export gcio::SetInvert
